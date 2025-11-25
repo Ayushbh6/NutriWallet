@@ -1,0 +1,2 @@
+"""NutriWallet Backend Application."""
+
