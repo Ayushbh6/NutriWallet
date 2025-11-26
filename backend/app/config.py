@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_secret_key: str = ""
 
+    # Celery/Redis Configuration
+    redis_url: str = "redis://localhost:6379/0"
+
     # Logging
     log_level: str = "INFO"
 

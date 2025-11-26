@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Dict
 from pydantic import BaseModel, Field
 
 
@@ -38,6 +38,10 @@ class PriceResult(BaseModel):
     city: str = Field(..., description="City name")
     url: Optional[str] = Field(default=None, description="Product URL")
     scraped_at: datetime = Field(..., description="When price was scraped")
+    last_updated: Optional[datetime] = Field(default=None, description="Last update timestamp")
+    source_type: Optional[str] = Field(default="crawl4ai", description="Source type (crawl4ai, cache)")
+    confidence: Optional[float] = Field(default=1.0, description="Confidence score (0.0-1.0)")
+    is_fresh: Optional[bool] = Field(default=True, description="Whether price is within SLA window")
 
 
 class PriceResponse(BaseModel):
@@ -63,4 +67,27 @@ class HealthResponse(BaseModel):
 
     status: str = "healthy"
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+# Optimizer Schemas
+class OptimizedIngredient(BaseModel):
+    """Optimized ingredient with quantity and cost."""
+
+    product_name: str = Field(..., description="Product name")
+    quantity: float = Field(..., description="Quantity in kg/L/pieces")
+    unit: str = Field(..., description="Unit (kg, L, piece, etc.)")
+    total_cost: Decimal = Field(..., description="Total cost for this quantity")
+    store: str = Field(..., description="Store name")
+    nutrition: Dict[str, float] = Field(..., description="Nutrition per quantity (protein, carbs, fat, calories)")
+
+
+class OptimizerResult(BaseModel):
+    """Result from optimizer agent."""
+
+    status: str = Field(..., description="Status: optimal, infeasible, budget_too_low")
+    ingredients: list[OptimizedIngredient] = Field(default_factory=list, description="Optimized ingredient list")
+    total_cost: Decimal = Field(..., description="Total cost of all ingredients")
+    total_protein: float = Field(..., description="Total protein in grams")
+    total_calories: float = Field(..., description="Total calories")
+    budget_utilization: float = Field(..., description="Budget utilization percentage")
 

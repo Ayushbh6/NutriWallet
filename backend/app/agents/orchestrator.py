@@ -7,7 +7,9 @@ from pydantic_ai import Agent
 
 from app.config import settings
 from app.agents.researcher import ResearcherAgent
-from app.api.schemas import PriceResult
+from app.agents.optimizer import OptimizerAgent
+from app.api.schemas import PriceResult, OptimizerResult
+from app.db.repository import PriceRepository
 
 logger = structlog.get_logger()
 
@@ -22,9 +24,10 @@ class OrchestratorRequest(BaseModel):
 
 
 class OrchestratorResponse(BaseModel):
-    """Response model for orchestrator (Week 1: price data only)."""
+    """Response model for orchestrator (Week 2: includes optimizer results)."""
 
     prices: list[PriceResult]
+    optimizer_result: OptimizerResult | None = None
     total_products: int
     city: str
 
@@ -38,9 +41,11 @@ class OrchestratorAgent:
             'openai:gpt-5.1-mini',
             system_prompt="""You are the orchestrator for a budget-first meal planning system. 
             Your role is to coordinate between different agents to gather price data and generate meal plans.
-            For Week 1, focus on coordinating price research. In later weeks, you'll coordinate meal optimization.""",
+            Week 2: Coordinate Researcher Agent to fetch prices, then Optimizer Agent to optimize ingredient selection.""",
         )
         self.researcher = ResearcherAgent()
+        self.optimizer = OptimizerAgent()
+        self.repository = PriceRepository()
 
     async def process_request(
         self, request: OrchestratorRequest
@@ -48,14 +53,13 @@ class OrchestratorAgent:
         """
         Process a meal planning request.
         
-        Week 1: Coordinates price fetching via Researcher Agent.
-        Week 2+: Will coordinate full meal plan generation.
+        Week 2: Coordinates Researcher Agent to fetch prices, then Optimizer Agent to optimize.
         
         Args:
             request: Orchestrator request with budget, city, preferences
             
         Returns:
-            OrchestratorResponse with price data (Week 1)
+            OrchestratorResponse with price data and optimizer results
         """
         logger.info(
             "orchestrator_request_start",
@@ -64,33 +68,54 @@ class OrchestratorAgent:
             city=request.city,
         )
 
-        # Week 1: Simple price fetching demonstration
-        # Fetch a sample product price (chicken breast from SPAR Vienna)
-        prices = []
-
-        # Example: Fetch chicken breast price
-        # TODO: Week 2 - Fetch prices for all products in MVP product list
-        sample_price = await self.researcher.fetch_price(
-            product_name="chicken breast",
+        # Step 1: Get prices from database (cached) or fetch fresh
+        prices = await self.repository.get_prices(
             city=request.city,
-            store="spar",
+            category=None,
+            store=None,
         )
 
-        if sample_price:
-            prices.append(sample_price)
-            logger.info(
-                "orchestrator_price_fetched",
-                product=sample_price.product_name,
-                price=sample_price.price,
+        # If no cached prices, try fetching fresh (fallback to Researcher)
+        if not prices:
+            logger.info("orchestrator_no_cached_prices", city=request.city)
+            # Try fetching a sample product
+            sample_price = await self.researcher.fetch_price(
+                product_name="chicken breast",
+                city=request.city,
+                store="spar",
             )
+            if sample_price:
+                prices.append(sample_price)
+
+        # Step 2: Optimize ingredient selection
+        optimizer_result = None
+        if prices:
+            try:
+                optimizer_result = self.optimizer.optimize(
+                    prices=prices,
+                    budget=request.budget,
+                    currency=request.currency,
+                    min_protein_variety=3,
+                    max_per_item_units=2.0,
+                )
+                logger.info(
+                    "orchestrator_optimizer_complete",
+                    status=optimizer_result.status,
+                    ingredients_count=len(optimizer_result.ingredients),
+                )
+            except Exception as e:
+                logger.error("orchestrator_optimizer_error", error=str(e))
+                # Return partial results without optimizer data
 
         logger.info(
             "orchestrator_request_complete",
             prices_fetched=len(prices),
+            optimizer_status=optimizer_result.status if optimizer_result else None,
         )
 
         return OrchestratorResponse(
             prices=prices,
+            optimizer_result=optimizer_result,
             total_products=len(prices),
             city=request.city,
         )
